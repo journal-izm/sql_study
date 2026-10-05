@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenWeather MySQL CRUD</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f3f6fb;margin:0;color:#172033}main{max-width:1050px;margin:auto;padding:30px 16px}
+section,header{background:#fff;padding:20px;border-radius:14px;margin-bottom:15px}header{background:#172033;color:#fff}
+button,input,select,textarea{padding:9px;margin:4px;border-radius:7px;border:1px solid #ccd5e2}button{background:#2563eb;color:#fff;border:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.card{border:1px solid #dce3ee;padding:12px;border-radius:10px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #e5e7eb;text-align:left}pre{background:#0f172a;color:#7dd3fc;padding:12px;border-radius:8px;white-space:pre-wrap}
+textarea{width:95%;min-height:70px}
+</style></head><body><main>
+<header><h1>OpenWeather → MySQL → 기사 CRUD</h1><p>FastAPI/Node.js 공통 학습 흐름: 수집 → 저장 → 분석 → CRUD</p></header>
+<section><h2>1. 날씨 수집/분석</h2><select id="city"><option value="seoul">서울</option><option value="busan">부산</option><option value="jeju">제주</option><option value="gwangju">광주</option></select>
+<button onclick="collect()">수집·저장</button><button onclick="summary()">지역별 분석</button><div id="analysis" class="grid"></div></section>
+<section><h2>2. 기사 CRUD</h2><div class="grid">
+<div class="card"><b>C - CREATE</b><br><input id="cweather" type="number" min="1" placeholder="weather_id (선택)"><input id="ctitle" placeholder="기사 제목"><textarea id="cbody" placeholder="본문"></textarea><button onclick="createArticle()">생성</button></div>
+<div class="card"><b>U - UPDATE</b><br><input id="uid" type="number" placeholder="article_id"><input id="utitle" placeholder="수정 제목"><select id="ustatus"><option>DRAFT</option><option>REVIEW</option><option>APPROVED</option><option>REJECTED</option></select><button onclick="updateArticle()">수정</button></div>
+<div class="card"><b>D - DELETE</b><br><input id="did" type="number" placeholder="article_id"><button onclick="deleteArticle()">삭제</button></div>
+</div><p><button onclick="loadArticles()">R - READ 전체 조회</button></p>
+<table><thead><tr><th>ID</th><th>지역</th><th>제목</th><th>상태</th></tr></thead><tbody id="rows"></tbody></table></section>
+<section><h2>로그</h2><pre id="log">&gt; 대기 중</pre></section>
+<script>
+const $=id=>document.getElementById(id);const lg=m=>$('log').textContent+='\n'+m;
+async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});const j=await r.json();if(!r.ok)throw Error(j.detail||j.error||r.status);return j}
+async function collect(){try{const r=await api('/api/weather/collect?city='+$('city').value,{method:'POST'});lg('저장 weather_id='+r.weatherId)}catch(e){lg('오류 '+e.message)}}
+async function summary(){try{const r=await api('/api/analysis/summary');$('analysis').innerHTML=r.data.map(x=>`<div class="card"><b>${x.region_name}</b><br>관측 ${x.observation_count}건<br>평균 ${x.avg_temperature}℃<br>최고 ${x.max_temperature}℃ / 최저 ${x.min_temperature}℃</div>`).join('');lg('분석 완료')}catch(e){lg('오류 '+e.message)}}
+async function createArticle(){try{const r=await api('/api/articles',{method:'POST',body:JSON.stringify({weatherId:$('cweather').value ? Number($('cweather').value) : null,title:$('ctitle').value,bodyText:$('cbody').value})});lg('CREATE '+r.data.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
+async function loadArticles(){try{const r=await api('/api/articles');$('rows').innerHTML=r.data.map(a=>`<tr><td>${a.article_id}</td><td>${a.source_region||''}</td><td>${a.title}</td><td>${a.status}</td></tr>`).join('');lg('READ '+r.count+'건')}catch(e){lg('오류 '+e.message)}}
+async function updateArticle(){try{const r=await api('/api/articles/'+$('uid').value,{method:'PATCH',body:JSON.stringify({title:$('utitle').value,status:$('ustatus').value})});lg('UPDATE '+r.data.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
+async function deleteArticle(){try{const r=await api('/api/articles/'+$('did').value,{method:'DELETE'});lg('DELETE '+r.deleted.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
+</script></main></body></html>
