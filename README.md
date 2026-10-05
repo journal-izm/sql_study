@@ -2,6 +2,18 @@
 
 SQL 기초부터 데이터베이스 활용까지 단계적으로 학습하는 실습 저장소입니다.
 
+## 기상 데이터 실습 안내
+
+SQL 실습을 먼저 진행하고, FastAPI 또는 Node.js 중 하나를 선택하여 MySQL 연결과 기사 CRUD를 실습합니다.
+
+| 순서 | 자료 | 학습 내용 |
+|---|---|---|
+| 1 | [SQL 실습](sql-weather_constraints_lab/weather_mysql_join_constraints_lab.sql) | JOIN, PK, FK, UNIQUE, CHECK, 삭제 정책 |
+| 2-A | [FastAPI 앱](openweather-fastapi-mysql-crud-constraints-app/README.md) | Python으로 기상 수집·저장·기사 CRUD |
+| 2-B | [Node.js 앱](openweather-node-mysql-crud-constraints-app/README.md) | JavaScript로 기상 수집·저장·기사 CRUD |
+
+SQL 단독 실습은 `weather_constraints_lab`, 두 앱은 `weatherNewsDB`를 사용합니다. MySQL 8.0.16 이상이 필요합니다.
+
 ## 학습 목표
 
 - 데이터베이스와 테이블의 기본 구조 이해

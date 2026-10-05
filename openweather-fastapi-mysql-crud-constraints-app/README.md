@@ -1,8 +1,8 @@
-# OpenWeather + FastAPI + MySQL CRUD 학습 프로젝트
+# openweather-fastapi-mysql-crud-constraints-app
 
 ## 목적
 
-기존 `openweather-fastapi-mysql-app`을 **CRUD 학습 단계까지 확장**한 버전입니다.
+OpenWeather 기상 수집과 기사 CRUD에 MySQL 제약조건을 적용하는 학습 프로젝트입니다.
 
 ```text
 OpenWeather API
@@ -31,7 +31,10 @@ OpenWeather API
 4. 패키지 설치
 5. FastAPI 실행
 
+저장소 루트에서 해당 앱 폴더로 이동한 뒤 실행합니다.
+
 ```powershell
+cd openweather-fastapi-mysql-crud-constraints-app
 Copy-Item .env.example .env
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -79,3 +82,10 @@ MySQL 8.0.16 이상과 InnoDB를 사용합니다.
 학습용 CASCADE 삭제 예: DELETE FROM weather_observation WHERE weather_id=1; 연결된 기사도 삭제됩니다. 기사 근거 보존이 필요한 서비스에서는 RESTRICT, 기사만 남기려면 SET NULL을 선택하세요. ON DELETE RESTRICTED는 잘못된 문법입니다.
 
 constraints_test.py로 PK/FK/UNIQUE/CHECK/CASCADE를 실제 DB에서 검증할 수 있습니다. python -m pip install pymysql python-dotenv 후 python constraints_test.py 실행. 테스트 행은 트랜잭션을 롤백합니다.
+
+## 관련 실습
+
+- [저장소 학습 안내](../README.md)
+- [Workbench JOIN·제약조건 실습](../sql-weather_constraints_lab/weather_mysql_join_constraints_lab.sql)
+
+SQL 단독 실습 DB는 `weather_constraints_lab`, 이 앱의 기본 DB는 `weatherNewsDB`입니다.

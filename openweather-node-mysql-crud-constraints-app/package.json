@@ -1,7 +1,7 @@
 {
-  "name": "openweather-node-mysql-crud-app",
+  "name": "openweather-node-mysql-crud-constraints-app",
   "version": "1.0.0",
-  "description": "OpenWeather + Express + localhost MySQL + 기사 CRUD 학습",
+  "description": "OpenWeather + Express + MySQL + 기사 CRUD 및 제약조건 학습",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
