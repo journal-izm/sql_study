@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / ".env")
@@ -68,6 +68,23 @@ class ArticleCreate(BaseModel):
     leadText: str | None = None
     bodyText: str | None = None
     status: Literal["DRAFT", "REVIEW", "APPROVED", "REJECTED"] = "DRAFT"
+
+
+# 기본값을 두지 않아 nullable 항목도 PUT 요청에서 반드시 명시하도록 합니다.
+class ArticleReplace(BaseModel):
+    weatherId: int | None = Field(..., gt=0)
+    sourceRegion: str | None = Field(..., max_length=30)
+    title: str = Field(..., min_length=1, max_length=200)
+    leadText: str | None
+    bodyText: str | None
+    status: Literal["DRAFT", "REVIEW", "APPROVED", "REJECTED"]
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, value):
+        if not value.strip():
+            raise ValueError("title은 공백만 입력할 수 없습니다.")
+        return value
 
 
 class ArticleUpdate(BaseModel):
@@ -233,7 +250,39 @@ def read_article(article_id: int):
         conn.close()
 
 
-@app.patch("/api/articles/{article_id}")
+@app.put("/api/articles/{article_id}", summary="기사 전체 교체 (PUT)")
+def replace_article(article_id: int, payload: ArticleReplace):
+    """수정 가능한 6개 필드를 모두 전달합니다. 비어 있는 선택 필드는 null입니다."""
+    if article_id <= 0:
+        raise HTTPException(400, detail="id는 양의 정수입니다.")
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            # rowcount는 변경량이므로 동일 PUT 재요청 시 존재 여부 판단에 쓰지 않습니다.
+            cur.execute("SELECT article_id FROM news_article WHERE article_id=%s FOR UPDATE", (article_id,))
+            if not cur.fetchone():
+                raise HTTPException(404, detail="기사를 찾을 수 없습니다.")
+            cur.execute(
+                """UPDATE news_article SET source_region=%s,title=%s,lead_text=%s,
+                body_text=%s,status=%s,weather_id=%s WHERE article_id=%s""",
+                (payload.sourceRegion, payload.title, payload.leadText,
+                 payload.bodyText, payload.status, payload.weatherId, article_id)
+            )
+            cur.execute("SELECT * FROM news_article WHERE article_id=%s", (article_id,))
+            row = cur.fetchone()
+        conn.commit()
+        return {"success": True, "crud": "UPDATE", "method": "PUT", "data": row}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:
+        conn.rollback()
+        raise db_error(exc) from exc
+    finally:
+        conn.close()
+
+
+@app.patch("/api/articles/{article_id}", summary="기사 부분 수정 (PATCH)")
 def update_article(article_id: int, payload: ArticleUpdate):
     raw = payload.model_dump(exclude_unset=True)
     if raw.get("title", "valid") is None or raw.get("status", "DRAFT") is None:
@@ -263,10 +312,10 @@ def update_article(article_id: int, payload: ArticleUpdate):
                 f"UPDATE news_article SET {', '.join(set_parts)} WHERE article_id=%s",
                 tuple(values)
             )
-            if cur.rowcount == 0:
-                raise HTTPException(404, detail="기사를 찾을 수 없습니다.")
             cur.execute("SELECT * FROM news_article WHERE article_id=%s", (article_id,))
             row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, detail="기사를 찾을 수 없습니다.")
         conn.commit()
         return {"success": True, "crud": "UPDATE", "data": row}
     except HTTPException:
@@ -296,3 +345,4 @@ def delete_article(article_id: int):
         raise
     finally:
         conn.close()
+

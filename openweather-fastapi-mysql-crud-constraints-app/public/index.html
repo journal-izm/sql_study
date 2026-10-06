@@ -14,7 +14,14 @@ textarea{width:95%;min-height:70px}
 <button onclick="collect()">수집·저장</button><button onclick="summary()">지역별 분석</button><div id="analysis" class="grid"></div></section>
 <section><h2>2. 기사 CRUD</h2><div class="grid">
 <div class="card"><b>C - CREATE</b><br><input id="cweather" type="number" min="1" placeholder="weather_id (선택)"><input id="ctitle" placeholder="기사 제목"><textarea id="cbody" placeholder="본문"></textarea><button onclick="createArticle()">생성</button></div>
-<div class="card"><b>U - UPDATE</b><br><input id="uid" type="number" placeholder="article_id"><input id="utitle" placeholder="수정 제목"><select id="ustatus"><option>DRAFT</option><option>REVIEW</option><option>APPROVED</option><option>REJECTED</option></select><button onclick="updateArticle()">수정</button></div>
+<div class="card"><b>U - UPDATE</b><br><input id="uid" type="number" placeholder="article_id"><input id="utitle" placeholder="수정 제목"><select id="ustatus"><option value="">상태 유지</option><option>DRAFT</option><option>REVIEW</option><option>APPROVED</option><option>REJECTED</option></select><button onclick="updateArticle()">부분 수정 (PATCH)</button>
+<details style="margin:12px 4px"><summary>전체 교체 (PUT) 펼치기</summary>
+<p>위 article_id로 불러온 뒤 전체 항목을 수정하세요.</p>
+<button onclick="loadForPut()">기사 불러오기</button>
+<input id="pregion" placeholder="지역"><input id="pweather" type="number" min="1" placeholder="weather_id (선택)">
+<input id="ptitle" placeholder="제목 (필수)"><textarea id="plead" placeholder="리드문"></textarea><textarea id="pbody" placeholder="본문"></textarea>
+<select id="pstatus"><option>DRAFT</option><option>REVIEW</option><option>APPROVED</option><option>REJECTED</option></select>
+<button onclick="replaceArticle()">전체 교체 (PUT)</button><p>빈 선택 항목은 null로 저장합니다. PK·생성 시각은 유지합니다.</p></details></div>
 <div class="card"><b>D - DELETE</b><br><input id="did" type="number" placeholder="article_id"><button onclick="deleteArticle()">삭제</button></div>
 </div><p><button onclick="loadArticles()">R - READ 전체 조회</button></p>
 <table><thead><tr><th>ID</th><th>지역</th><th>제목</th><th>상태</th></tr></thead><tbody id="rows"></tbody></table></section>
@@ -26,6 +33,29 @@ async function collect(){try{const r=await api('/api/weather/collect?city='+$('c
 async function summary(){try{const r=await api('/api/analysis/summary');$('analysis').innerHTML=r.data.map(x=>`<div class="card"><b>${x.region_name}</b><br>관측 ${x.observation_count}건<br>평균 ${x.avg_temperature}℃<br>최고 ${x.max_temperature}℃ / 최저 ${x.min_temperature}℃</div>`).join('');lg('분석 완료')}catch(e){lg('오류 '+e.message)}}
 async function createArticle(){try{const r=await api('/api/articles',{method:'POST',body:JSON.stringify({weatherId:$('cweather').value ? Number($('cweather').value) : null,title:$('ctitle').value,bodyText:$('cbody').value})});lg('CREATE '+r.data.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
 async function loadArticles(){try{const r=await api('/api/articles');$('rows').innerHTML=r.data.map(a=>`<tr><td>${a.article_id}</td><td>${a.source_region||''}</td><td>${a.title}</td><td>${a.status}</td></tr>`).join('');lg('READ '+r.count+'건')}catch(e){lg('오류 '+e.message)}}
-async function updateArticle(){try{const r=await api('/api/articles/'+$('uid').value,{method:'PATCH',body:JSON.stringify({title:$('utitle').value,status:$('ustatus').value})});lg('UPDATE '+r.data.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
+// PATCH: 빈 제목 / 상태 유지 선택은 요청에서 제외합니다.
+async function updateArticle(){try{
+ const payload={}; if($('utitle').value.trim()) payload.title=$('utitle').value;
+ if($('ustatus').value) payload.status=$('ustatus').value;
+ if(!Object.keys(payload).length) throw Error('수정할 제목 또는 상태를 입력하세요.');
+ const r=await api('/api/articles/'+$('uid').value,{method:'PATCH',body:JSON.stringify(payload)});
+ lg('PATCH '+r.data.article_id);await loadArticles();
+}catch(e){lg('오류 '+e.message)}}
+// GET으로 모든 수정 가능 항목을 읽어 PUT 폼에 채웁니다.
+async function loadForPut(){try{
+ const r=await api('/api/articles/'+$('uid').value);const a=r.data;
+ $('pregion').value=a.source_region??'';$('pweather').value=a.weather_id??'';
+ $('ptitle').value=a.title;$('plead').value=a.lead_text??'';$('pbody').value=a.body_text??'';$('pstatus').value=a.status;
+ lg('PUT 편집용 조회 '+a.article_id);
+}catch(e){lg('오류 '+e.message)}}
+// PUT: 6개 필드를 모두 전송합니다. 빈 선택 항목도 null로 명시합니다.
+async function replaceArticle(){try{
+ if(!$('ptitle').value.trim()) throw Error('제목을 입력하세요.');
+ const payload={sourceRegion:$('pregion').value||null,title:$('ptitle').value,
+ leadText:$('plead').value||null,bodyText:$('pbody').value||null,status:$('pstatus').value,
+ weatherId:$('pweather').value?Number($('pweather').value):null};
+ const r=await api('/api/articles/'+$('uid').value,{method:'PUT',body:JSON.stringify(payload)});
+ lg('PUT '+r.data.article_id);await loadArticles();
+}catch(e){lg('오류 '+e.message)}}
 async function deleteArticle(){try{const r=await api('/api/articles/'+$('did').value,{method:'DELETE'});lg('DELETE '+r.deleted.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
 </script></main></body></html>

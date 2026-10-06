@@ -166,7 +166,32 @@ app.get('/api/articles/:id', async (req, res) => {
   }
 });
 
-// U
+// PUT: 모든 수정 가능 필드를 전달하여 전체 교체합니다. null도 명시합니다.
+// article_id와 생성 시각은 서버 관리 값이므로 교체하지 않습니다.
+app.put('/api/articles/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({success:false,error:'id는 양의 정수입니다.'});
+    const keys = ['sourceRegion','title','leadText','bodyText','status','weatherId'];
+    if (!keys.every(k => Object.hasOwn(req.body, k))) return res.status(400).json({success:false,error:'PUT은 sourceRegion, title, leadText, bodyText, status, weatherId를 모두 전달하세요. 비어 있는 선택 항목은 null입니다.'});
+    const {sourceRegion,title,leadText,bodyText,status,weatherId} = req.body;
+    if (typeof title !== 'string' || !title.trim() || title.length > 200) return res.status(400).json({success:false,error:'title은 1~200자이며 공백만 입력할 수 없습니다.'});
+    if (!['DRAFT','REVIEW','APPROVED','REJECTED'].includes(status)) return res.status(400).json({success:false,error:'status 값을 확인하세요.'});
+    if ([sourceRegion,leadText,bodyText].some(v => v !== null && typeof v !== 'string') || (sourceRegion !== null && sourceRegion.length > 30)) return res.status(400).json({success:false,error:'선택 문자열의 형식/지역 길이를 확인하세요.'});
+    if (weatherId !== null && (!Number.isSafeInteger(weatherId) || weatherId <= 0)) return res.status(400).json({success:false,error:'weatherId는 양의 정수 또는 null입니다.'});
+    // 동일 내용으로 PUT을 반복해도 404가 되지 않도록 존재 여부는 SELECT로 확인합니다.
+    const [found] = await pool.execute('SELECT article_id FROM news_article WHERE article_id=?', [id]);
+    if (!found.length) return res.status(404).json({success:false,error:'기사를 찾을 수 없습니다.'});
+    await pool.execute('UPDATE news_article SET source_region=?,title=?,lead_text=?,body_text=?,status=?,weather_id=? WHERE article_id=?', [sourceRegion,title,leadText,bodyText,status,weatherId,id]);
+    const [rows] = await pool.execute('SELECT * FROM news_article WHERE article_id=?', [id]);
+    if (!rows.length) return res.status(404).json({success:false,error:'기사를 찾을 수 없습니다.'});
+    res.json({success:true,crud:'UPDATE',method:'PUT',data:rows[0]});
+  } catch (error) {
+    res.status(dbStatus(error)).json({success:false,error:error.message});
+  }
+});
+
+// PATCH: 요청에 들어온 필드만 변경합니다.
 app.patch('/api/articles/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -199,13 +224,12 @@ app.patch('/api/articles/:id', async (req, res) => {
       values
     );
 
-    if (!result.affectedRows) return res.status(404).json({ success:false, error:'기사를 찾을 수 없습니다.' });
-
     const [rows] = await pool.execute(
       'SELECT * FROM news_article WHERE article_id=?',
       [id]
     );
-    res.json({ success:true, crud:'UPDATE', data:rows[0] });
+    if (!rows.length) return res.status(404).json({success:false,error:'기사를 찾을 수 없습니다.'});
+    res.json({ success:true, crud:'UPDATE', method:'PATCH', data:rows[0] });
   } catch (error) {
     res.status(dbStatus(error)).json({ success:false, error:error.message });
   }
@@ -236,3 +260,4 @@ app.listen(PORT, () => {
   console.log(`OpenWeather + Node.js + MySQL CRUD`);
   console.log(`http://localhost:${PORT}`);
 });
+
