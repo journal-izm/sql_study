@@ -26,14 +26,22 @@ textarea{width:95%;min-height:70px}
 </div><p><button onclick="loadArticles()">R - READ 전체 조회</button></p>
 <table><thead><tr><th>ID</th><th>지역</th><th>제목</th><th>상태</th></tr></thead><tbody id="rows"></tbody></table></section>
 <section><h2>로그</h2><pre id="log">&gt; 대기 중</pre></section>
+<!-- 브라우저 JavaScript: 입력 → 객체 → JSON → fetch → 서버 → JSON 응답 → 화면 갱신 순서입니다. -->
 <script>
+// $는 ID로 요소를 찾는 짧은 함수입니다. lg는 서버 결과를 로그 영역에 텍스트로 추가합니다.
 const $=id=>document.getElementById(id);const lg=m=>$('log').textContent+='\n'+m;
+// 공통 요청 함수: fetch와 await로 응답을 기다리고 JSON으로 변환합니다. HTTP 실패는 호출자 catch로 전달합니다.
 async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt});const j=await r.json();if(!r.ok)throw Error(j.detail||j.error||r.status);return j}
+// POST 수집: 선택 도시를 query string으로 전달합니다. 반환 weatherId로 기사를 연결할 수 있습니다.
 async function collect(){try{const r=await api('/api/weather/collect?city='+$('city').value,{method:'POST'});lg('저장 weather_id='+r.weatherId)}catch(e){lg('오류 '+e.message)}}
+// 지역 집계를 받아 map으로 카드 HTML을 만듭니다. 이 값은 저장된 순간 관측들의 집계입니다.
 async function summary(){try{const r=await api('/api/analysis/summary');$('analysis').innerHTML=r.data.map(x=>`<div class="card"><b>${x.region_name}</b><br>관측 ${x.observation_count}건<br>평균 ${x.avg_temperature}℃<br>최고 ${x.max_temperature}℃ / 최저 ${x.min_temperature}℃</div>`).join('');lg('분석 완료')}catch(e){lg('오류 '+e.message)}}
+// 입력 문자열을 객체로 묶고 JSON.stringify로 전송합니다. 빈 FK 입력은 null로 처리합니다.
 async function createArticle(){try{const r=await api('/api/articles',{method:'POST',body:JSON.stringify({weatherId:$('cweather').value ? Number($('cweather').value) : null,title:$('ctitle').value,bodyText:$('cbody').value})});lg('CREATE '+r.data.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
+// GET 목록 응답의 data 배열을 map과 join으로 표에 표시합니다.
 async function loadArticles(){try{const r=await api('/api/articles');$('rows').innerHTML=r.data.map(a=>`<tr><td>${a.article_id}</td><td>${a.source_region||''}</td><td>${a.title}</td><td>${a.status}</td></tr>`).join('');lg('READ '+r.count+'건')}catch(e){lg('오류 '+e.message)}}
 // PATCH: 빈 제목 / 상태 유지 선택은 요청에서 제외합니다.
+// PATCH에서는 변경할 값만 payload에 넣습니다. 빈 입력을 보내 기존 값을 지우지 않도록 합니다.
 async function updateArticle(){try{
  const payload={}; if($('utitle').value.trim()) payload.title=$('utitle').value;
  if($('ustatus').value) payload.status=$('ustatus').value;
@@ -42,6 +50,7 @@ async function updateArticle(){try{
  lg('PATCH '+r.data.article_id);await loadArticles();
 }catch(e){lg('오류 '+e.message)}}
 // GET으로 모든 수정 가능 항목을 읽어 PUT 폼에 채웁니다.
+// GET 단건 결과의 DB 열 이름을 PUT 입력 폼에 대응시킵니다. ??는 null/undefined일 때 빈 값으로 바꿉니다.
 async function loadForPut(){try{
  const r=await api('/api/articles/'+$('uid').value);const a=r.data;
  $('pregion').value=a.source_region??'';$('pweather').value=a.weather_id??'';
@@ -49,6 +58,7 @@ async function loadForPut(){try{
  lg('PUT 편집용 조회 '+a.article_id);
 }catch(e){lg('오류 '+e.message)}}
 // PUT: 6개 필드를 모두 전송합니다. 빈 선택 항목도 null로 명시합니다.
+// PUT에서는 전체 수정 필드를 보냅니다. 서버가 필드 누락과 제목/상태/FK 형식을 다시 검사합니다.
 async function replaceArticle(){try{
  if(!$('ptitle').value.trim()) throw Error('제목을 입력하세요.');
  const payload={sourceRegion:$('pregion').value||null,title:$('ptitle').value,
@@ -57,5 +67,6 @@ async function replaceArticle(){try{
  const r=await api('/api/articles/'+$('uid').value,{method:'PUT',body:JSON.stringify(payload)});
  lg('PUT '+r.data.article_id);await loadArticles();
 }catch(e){lg('오류 '+e.message)}}
+// DELETE 후 목록을 다시 읽어 서버에 실제 저장된 상태를 표시합니다.
 async function deleteArticle(){try{const r=await api('/api/articles/'+$('did').value,{method:'DELETE'});lg('DELETE '+r.deleted.article_id);loadArticles()}catch(e){lg('오류 '+e.message)}}
 </script></main></body></html>

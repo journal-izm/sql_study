@@ -14,10 +14,12 @@ SOURCE_URL = 'https://data.kma.go.kr/data/grnd/selectAsosRltmList.do?pgmNo=36'
 BASE = Path(__file__).resolve().parent
 
 
+# 환경변수로 MySQL 연결을 만듭니다. 비밀번호를 소스에 직접 쓰지 않습니다.
 def connect():
     # DB를 사용할 때만 연결 라이브러리를 읽습니다.
     import pymysql
     from dotenv import load_dotenv
+    # 현재 파일 폴더의 .env를 읽어 실행 위치가 달라도 설정을 찾습니다.
     load_dotenv(BASE / '.env')
     return pymysql.connect(host=os.getenv('MYSQL_HOST','127.0.0.1'),
         port=int(os.getenv('MYSQL_PORT','3306')), user=os.getenv('MYSQL_USER','root'),
@@ -25,13 +27,16 @@ def connect():
         charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor, autocommit=False)
 
 
+# CSV 열 이름만 정규화합니다. 관측값을 바꾸는 함수는 아닙니다.
 def normalize(value):
     # 열 이름의 공백, BOM, ℃/°C 표기 차이를 처리합니다.
     return re.sub(r'\s+', '', value.lstrip('\ufeff')).replace('°C','℃')
 
 
+# CSV 전체를 먼저 검사합니다. 이 함수는 DB에 저장하지 않고 검증된 행과 파일 해시를 반환합니다.
 def read_csv(path, encoding=None):
     raw = Path(path).read_bytes()
+    # UTF-8 BOM을 먼저 시도하고 실패하면 CP949를 시도합니다. 원본 한글 CSV 인코딩에 대응합니다.
     encodings = [encoding] if encoding else ['utf-8-sig','cp949']
     for enc in encodings:
         try:
@@ -41,6 +46,7 @@ def read_csv(path, encoding=None):
             continue
     else:
         raise ValueError('CSV 인코딩을 확인하세요. --encoding으로 지정할 수 있습니다.')
+    # 첫 줄을 열 이름으로 읽어 각 데이터 행을 딕셔너리로 만듭니다.
     reader = csv.DictReader(text.splitlines())
     if not reader.fieldnames:
         raise ValueError('CSV 헤더가 없습니다.')
@@ -54,6 +60,7 @@ def read_csv(path, encoding=None):
     name_col = column('지점명','station_name')
     day_col = column('일시','observed_date')
     temp_col = column('평균기온(℃)','avg_temp_c')
+    # 행 목록과 중복검사용 집합을 초기화합니다. 같은 관측소/날짜는 한 번만 허용합니다.
     rows, seen = [], set()
     names = {}
     for line, row in enumerate(reader, 2):
@@ -68,6 +75,7 @@ def read_csv(path, encoding=None):
             if day > date.today():
                 raise ValueError('미래 날짜의 관측값입니다.')
             value = row[temp_col].strip()
+            # 빈 값은 None으로 유지합니다. 0℃는 유효한 관측값이므로 결측과 구분합니다.
             temp = None if value in ('','NA','N/A','null','NULL','-') else Decimal(value)
             if temp is not None and (not temp.is_finite() or not -100 <= temp <= 100):
                 raise ValueError('기온이 비정상입니다. 결측 코드와 단위를 확인하세요.')
@@ -88,6 +96,7 @@ def read_csv(path, encoding=None):
     return rows, hashlib.sha256(raw).hexdigest(), enc
 
 
+# 검증된 원본 한 파일을 한 트랜잭션으로 가져옵니다. 중간 실패 시 일부 행만 남지 않게 합니다.
 def import_csv(args):
     rows, digest, encoding = read_csv(args.csv, args.encoding)
     print(f'검증 완료: {len(rows)}행, 인코딩 {encoding}, 결측 기온 {sum(r[3] is None for r in rows)}건')
@@ -113,6 +122,7 @@ def import_csv(args):
                 if not station:
                     cur.execute('INSERT INTO station VALUES(%s,%s)',(sid,name))
                 cur.execute('SELECT avg_temp_c FROM daily_weather WHERE station_id=%s AND observed_date=%s',(sid,day))
+                # 이미 저장된 같은 날짜의 행을 찾습니다. 동일 값은 생략하고 다른 값은 정정 여부를 확인합니다.
                 existing = cur.fetchone()
                 if existing:
                     if existing['avg_temp_c'] != temp:
@@ -122,28 +132,36 @@ def import_csv(args):
                 cur.execute('INSERT INTO daily_weather(station_id,observed_date,avg_temp_c,batch_id) VALUES(%s,%s,%s,%s)',
                     (sid,day,temp,batch_id))
                 inserted += 1
+        # 쓰기 작업을 확정합니다. 이 줄 전의 작업은 실패 시 rollback할 수 있습니다.
         conn.commit()
         print(f'저장 {inserted}행 / 동일 값 생략 {skipped}행 / batch_id={batch_id}')
     except Exception:
+        # 이번 트랜잭션의 쓰기를 취소하고 원래 오류를 상위 호출자에게 전달합니다.
         conn.rollback()
         raise
     finally:
+        # 연결을 반환/종료합니다. 성공해도 오류가 나도 finally에서 정리합니다.
         conn.close()
 
 
+# 해당 월의 모든 날짜가 있는지 먼저 확인하고 일평균기온들의 산술평균을 계산합니다.
 def summarize(rows, year, month):
     # 날짜 누락과 기온 NULL을 별도로 확인합니다. 부분 평균으로 월 평균 기사를 만들지 않습니다.
+    # 달력으로 해당 월의 모든 날짜를 만들어 실제 데이터와 대조합니다.
     expected = {date(year,month,d) for d in range(1,calendar.monthrange(year,month)[1]+1)}
     days = {r['observed_date'] for r in rows}
+    # 행 자체가 없는 날짜를 찾습니다. 행은 있지만 기온 NULL인 경우와 따로 보고합니다.
     missing = sorted(expected - days)
     null_days = sorted(r['observed_date'] for r in rows if r['avg_temp_c'] is None)
     if missing or null_days:
         raise ValueError(f'{year}-{month:02}: 누락 날짜 {[str(d) for d in missing]}, 결측 기온 {[str(d) for d in null_days]}')
+    # Decimal로 일평균기온을 합산하고 일수로 나눕니다. 계산 중 반올림은 하지 않습니다.
     mean = sum((r['avg_temp_c'] for r in rows),Decimal(0))/Decimal(len(rows))
     return {'year':year,'month':month,'expected_days':len(expected),'valid_days':len(rows),
             'mean_daily_temperature_c':float(mean.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP))},mean
 
 
+# 같은 관측소/같은 월의 두 해를 비교하고 기사 작성 당시 근거를 JSON으로 보존합니다.
 def compare(args):
     if args.baseline_year == args.target_year:
         raise ValueError('서로 다른 두 해를 선택하세요.')
@@ -171,6 +189,7 @@ def compare(args):
                     source={key:row[key] for key in ['batch_id','file_name','sha256','source_url']}
                     if source not in sources:
                         sources.append(source)
+            # AI나 사람이 읽을 사실 묶음입니다. 수치와 함께 지역/기간/단위/출처/해석 한계를 저장합니다.
             facts={'station_id':args.station,'station_name':station['station_name'],
                 'metric':'일평균기온의 월 산술평균','unit':'℃','baseline':summaries[0], 'target':summaries[1],
                 'difference_c':float((means[1]-means[0]).quantize(Decimal('0.01'),rounding=ROUND_HALF_UP)),
@@ -178,19 +197,24 @@ def compare(args):
             cur.execute('INSERT INTO analysis_result(station_id,baseline_year,target_year,target_month,fact_sheet) VALUES(%s,%s,%s,%s,%s)',
                 (args.station,args.baseline_year,args.target_year,args.month,json.dumps(facts,ensure_ascii=False)))
             facts['analysis_id']=cur.lastrowid
+        # 쓰기 작업을 확정합니다. 이 줄 전의 작업은 실패 시 rollback할 수 있습니다.
         conn.commit()
     except Exception:
+        # 이번 트랜잭션의 쓰기를 취소하고 원래 오류를 상위 호출자에게 전달합니다.
         conn.rollback()
         raise
     finally:
+        # 연결을 반환/종료합니다. 성공해도 오류가 나도 finally에서 정리합니다.
         conn.close()
     output=Path(args.output)
     output.parent.mkdir(parents=True,exist_ok=True)
+    # DB 결과를 UTF-8 JSON 파일로도 저장해 수업 검토와 다음 단계 기사 생성에 사용합니다.
     output.write_text(json.dumps(facts,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(facts,ensure_ascii=False,indent=2))
     print(f'근거 저장: {output}')
 
 
+# 사람이 작성한 본문을 분석 ID에 연결합니다. HUMAN/DRAFT는 작성자 구분과 검토 전 상태입니다.
 def save_article(args):
     body=Path(args.body).read_text(encoding='utf-8-sig').strip()
     if not args.title.strip() or len(args.title.strip()) > 200 or not body:
@@ -201,15 +225,19 @@ def save_article(args):
             cur.execute('INSERT INTO news_article(analysis_id,title,lead_text,body_text,author_type) VALUES(%s,%s,%s,%s,%s)',
                 (args.analysis_id,args.title.strip(),args.lead,body,'HUMAN'))
             article_id=cur.lastrowid
+        # 쓰기 작업을 확정합니다. 이 줄 전의 작업은 실패 시 rollback할 수 있습니다.
         conn.commit()
         print(f'기사 저장 완료: article_id={article_id}, status=DRAFT')
     except Exception:
+        # 이번 트랜잭션의 쓰기를 취소하고 원래 오류를 상위 호출자에게 전달합니다.
         conn.rollback()
         raise
     finally:
+        # 연결을 반환/종료합니다. 성공해도 오류가 나도 finally에서 정리합니다.
         conn.close()
 
 
+# 명령줄 옵션을 읽고 import-csv, compare, save-article 중 하나를 실행합니다.
 def main():
     parser=argparse.ArgumentParser(description='과거 관측 CSV → MySQL → 같은 달 비교')
     sub=parser.add_subparsers(dest='command',required=True)
