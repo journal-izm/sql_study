@@ -1,0 +1,1 @@
+{"name":"weather-history-node-mysql-lab","version":"1.0.0","private":true,"type":"module","engines":{"node":">=20"},"scripts":{"test":"node --test","start":"node weather-lab.js"},"dependencies":{"csv-parse":"^6.1.0","iconv-lite":"^0.7.0","mysql2":"^3.15.0","dotenv":"^17.2.0"}}
