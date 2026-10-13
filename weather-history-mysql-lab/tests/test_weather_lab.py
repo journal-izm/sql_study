@@ -54,4 +54,7 @@ class WeatherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'누락 날짜'):
             summarize(rows,2025,9)
 
-if __name__=='__main__': unittest.main()
+
+
+if __name__ == '__main__':
+    unittest.main()

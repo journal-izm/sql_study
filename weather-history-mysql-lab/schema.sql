@@ -72,9 +72,24 @@ CREATE TABLE IF NOT EXISTS news_article (
  -- CHECK는 새로 저장/수정되는 값이 조건을 만족하는지 검사합니다. NULL 여부는 NOT NULL과 함께 설계합니다.
  CONSTRAINT ck_article_body CHECK (CHAR_LENGTH(TRIM(body_text)) > 0),
  -- CHECK는 새로 저장/수정되는 값이 조건을 만족하는지 검사합니다. NULL 여부는 NOT NULL과 함께 설계합니다.
- CONSTRAINT ck_article_author CHECK (author_type IN ('HUMAN','AI')),
+ CONSTRAINT ck_article_author CHECK (author_type IN ('HUMAN','TEMPLATE','AI')),
  -- CHECK는 새로 저장/수정되는 값이 조건을 만족하는지 검사합니다. NULL 여부는 NOT NULL과 함께 설계합니다.
  CONSTRAINT ck_article_status CHECK (status IN ('DRAFT','REVIEW','APPROVED','REJECTED'))
 );
 -- RESTRICT: 기사 근거인 분석과 관측소의 실수 삭제를 막습니다.
 -- 정확한 문법은 ON DELETE RESTRICT입니다.
+
+
+-- 생성 방식과 기사 작성 당시 근거/검사 결과를 함께 보존합니다.
+CREATE TABLE IF NOT EXISTS article_generation (
+ article_id BIGINT PRIMARY KEY,
+ generation_mode VARCHAR(16) NOT NULL,
+ model_name VARCHAR(255) NULL,
+ prompt_version VARCHAR(64) NOT NULL,
+ fact_snapshot JSON NOT NULL,
+ facts_sha256 CHAR(64) NOT NULL,
+ validation_checks JSON NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ CONSTRAINT fk_generation_article FOREIGN KEY (article_id) REFERENCES news_article(article_id) ON DELETE RESTRICT,
+ CONSTRAINT ck_generation_mode CHECK (generation_mode IN ('template','huggingface','openai'))
+);

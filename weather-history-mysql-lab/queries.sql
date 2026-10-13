@@ -50,3 +50,9 @@ SELECT a.article_id,a.title,a.status,s.station_name,r.baseline_year,
  r.target_year,r.target_month,r.fact_sheet
 FROM news_article a JOIN analysis_result r ON r.analysis_id=a.analysis_id
 JOIN station s ON s.station_id=r.station_id;
+
+-- 5. 생성 방식·모델·검사 결과를 원본 기사와 대조합니다. DRAFT는 검증 통과 상태가 아닙니다.
+SELECT a.article_id,a.title,a.author_type,a.status,g.generation_mode,g.model_name,
+ g.prompt_version,g.facts_sha256,g.validation_checks
+FROM news_article a LEFT JOIN article_generation g ON g.article_id=a.article_id
+ORDER BY a.article_id;
