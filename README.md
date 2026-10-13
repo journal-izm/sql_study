@@ -2,6 +2,12 @@
 
 SQL 기초부터 데이터베이스 활용까지 단계적으로 학습하는 실습 저장소입니다.
 
+## PostgreSQL 과거 관측·기사 실습 (`postgre` 브랜치)
+
+[weather-history-postgre-lab](weather-history-postgre-lab/README.md)은 실제 ASOS CSV 검증·저장·월 비교와 템플릿/Hugging Face/OpenAI 기사 초안을 지원하는 Python CLI입니다. 시간자료 CSV의 완전한 날짜 집계도 별도로 지원합니다. 설치, PostgreSQL 스키마, 환경변수, 세 모드의 비용·검토 한계, 테스트는 해당 README를 따릅니다.
+
+기존 MySQL 실습 폴더와 다른 파일은 유지합니다. PostgreSQL 코드는 위 독립 폴더에서 실행하며 이 브랜치를 main에 병합하지 않습니다.
+
 ## 기상 데이터 실습 안내
 
 SQL 실습을 먼저 진행하고, FastAPI 또는 Node.js 중 하나를 선택하여 MySQL 연결과 기사 CRUD를 실습합니다.
