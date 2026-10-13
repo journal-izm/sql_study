@@ -7,6 +7,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+class MockAuthenticationError(Exception): pass
+class MockRateLimitError(Exception): pass
+class MockTimeoutError(Exception): pass
+
+def mock_sdk(constructor):
+    return SimpleNamespace(OpenAI=constructor, AuthenticationError=MockAuthenticationError,
+        RateLimitError=MockRateLimitError, APITimeoutError=MockTimeoutError)
+
 import article_generation as ag
 
 
@@ -95,21 +103,23 @@ class GenerationTests(unittest.TestCase):
     @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-only-placeholder'}, clear=True)
     def test_openai_response_contract_and_audit(self):
         constructor, client = self.mocked_openai()
-        with patch.dict(sys.modules, {'openai': SimpleNamespace(OpenAI=constructor)}):
+        with patch.dict(sys.modules, {'openai': mock_sdk(constructor)}):
             draft = ag.create_draft(facts_fixture(), mode='openai', timeout=12)
         self.assertEqual(draft['model'], ag.OPENAI_MODEL)
-        constructor.assert_called_once_with(timeout=12, max_retries=0)
+        constructor.assert_called_once_with(api_key='test-only-placeholder', base_url='https://api.openai.com/v1', timeout=12, max_retries=0)
         kwargs = client.responses.create.call_args.kwargs
         self.assertFalse(kwargs['store'])
         self.assertEqual(kwargs['model'], ag.OPENAI_MODEL)
-        self.assertEqual(kwargs['text'], {'format': {'type': 'json_object'}})
+        self.assertEqual(kwargs['text'], {'format': ag.ARTICLE_FORMAT})
+        self.assertEqual(kwargs['reasoning'], {'effort': 'none'})
+        self.assertNotIn('temperature', kwargs)
         self.assertNotIn('private-name', kwargs['input'])
 
     @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-only-placeholder'}, clear=True)
     def test_incomplete_and_errors_do_not_become_template(self):
         for status, error in [('incomplete', None), ('completed', TimeoutError('secret material'))]:
             constructor, _ = self.mocked_openai(status=status, error=error)
-            with patch.dict(sys.modules, {'openai': SimpleNamespace(OpenAI=constructor)}):
+            with patch.dict(sys.modules, {'openai': mock_sdk(constructor)}):
                 with self.assertRaises(RuntimeError) as caught:
                     ag.create_draft(facts_fixture(), mode='openai')
                 self.assertNotIn('secret material', str(caught.exception))

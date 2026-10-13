@@ -1,6 +1,95 @@
 # 실제 기상 관측 CSV → MySQL → 근거 → 기사 초안
 
-기존 Python CLI의 `import-csv → compare → save-article` 흐름을 유지합니다. `save-article`은 사람이 쓴 본문을 저장하는 기존 명령입니다. 이번 버전에서 `generate-article`을 추가하여 같은 근거로 **템플릿 / 무료 로컬 Hugging Face / OpenAI API** 중 한 방식을 고를 수 있습니다. 예보 앱이나 웹 프레임워크로 바꾸지 않습니다.
+기존 Python CLI의 `import-csv → compare → save-article` 흐름을 유지합니다. `save-article`은 사람이 쓴 본문을 저장하는 기존 명령입니다. 이번 버전에서 `generate-article`을 추가하여 같은 근거로 **템플릿 / 무료 로컬 Hugging Face / OpenAI API** 중 한 방식을 고를 수 있습니다. FastAPI 브라우저 실습 화면을 추가하되, 기존 CLI 명령과 DB 기능을 유지합니다. 예보 기능은 추가하지 않습니다.
+
+## 0. VS Code에서 브라우저로 먼저 실행하기 (MySQL 불필요)
+
+이번 추가 기능은 **FastAPI 서버 + 기사 실습 화면**입니다. 자전거 실습과 같이 `CSV → Python facts → /articles → 브라우저` 순서이며, 기존 CLI와 MySQL 저장 기능은 그대로입니다. 웹 실습의 기본 자료는 저장소에 이미 포함된 **실제 ASOS 48행 발췌**입니다. 전체 1,008행 원본과 혼동하지 마세요.
+
+### Windows · 무료 사전 점검
+
+1. GitHub에서 최신 `main`을 받습니다. VS Code의 **파일 → 폴더 열기**로 `weather-history-mysql-lab` 폴더를 엽니다.
+2. **터미널 → 새 터미널**에서 아래 명령을 한 줄씩 실행합니다. Python 3.10 이상이 필요합니다. `.venv`가 이미 있으면 첫 줄을 생략합니다. 가상환경 활성화/PowerShell 실행 정책 변경 없이 실행할 수 있습니다.
+
+```powershell
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-api.txt
+.venv\Scripts\python.exe start_api.py --offline
+```
+
+3. 터미널은 켜 둔 채 브라우저 주소창에 **http://127.0.0.1:8000/** 을 입력합니다. `index.html` 파일을 직접 열거나 Live Server로 열지 않습니다.
+4. 왼쪽의 **24.64℃ · 완전한 1일 · 24시간**과 **전체 48행 중 불완전한 2일 제외**를 확인합니다. 기간은 2026-09-01~03이며 실제 포함 날짜는 9월 2일입니다.
+5. 기본 `template`를 유지하고 **초안 만들기**를 누릅니다. 이는 AI를 호출하지 않는 고정 문장 사전 점검입니다.
+6. 근거 JSON, 기사, 응답의 `facts_sha256`, `DRAFT`, `human_review_required`를 대조합니다. **JSON 내려받기 / TXT 내려받기**로 본인 컴퓨터에 보관할 수 있습니다.
+7. 서버 종료는 터미널에서 **Ctrl+C**입니다. 재실행하면 이전 화면의 초안은 복구되지 않으므로 필요한 파일을 먼저 내려받습니다.
+
+macOS/Linux에서는 첫 줄을 `python3 -m venv .venv`로, 이후 `.venv\Scripts\python.exe`를 `.venv/bin/python`으로 바꿉니다. 8000번 포트를 다른 앱이 쓰면 `--port 8001`을 붙이고 브라우저 주소도 8001로 바꿉니다.
+
+### API 문서에서도 같은 요청 보내기
+
+http://127.0.0.1:8000/docs 에서 **POST /articles → Try it out**을 선택하고 다음 본문으로 **Execute**를 누릅니다.
+
+```json
+{"mode": "template"}
+```
+
+- `GET /health`: 서버 상태·선택 모델·키 설정 여부·HF 활성 여부. `live_api_verified=false`는 실제 유료 호출을 검증하지 않았다는 뜻입니다. `status=ok`만으로 CSV나 계정이 정상이라는 의미는 아닙니다.
+- `GET /facts`: 모델 호출 없이 CSV 검증·집계 결과 확인.
+- `POST /articles`: `mode`는 `template`, `openai`, `huggingface`. 선택적으로 `max_tokens` 128~4096, `timeout` 1~120초를 지정합니다. timeout은 OpenAI 요청에만 적용되며 HF 전체 실행시간 제한은 아닙니다.
+- HTTP 요청에 CSV 경로·모델 이름·API 키를 넣지 않습니다. 알 수 없는 필드는 422로 거부합니다. 키는 문서의 Authorize나 JSON 본문에 입력하지 않습니다.
+- 서버는 브라우저 요청으로 파일이나 DB에 자동 저장하지 않습니다. 저장소의 기존 `generate-article` CLI는 JSON/TXT와 선택적 MySQL 저장을 계속 지원합니다.
+
+`/docs`의 Swagger UI는 CDN 자산을 불러옵니다. CDN 접속이 막히면 `/` 실습 화면은 외부 CSS/JS 없이 작동하므로 그 화면으로 계속할 수 있습니다.
+
+### OpenAI 선택 실습 · 본인 키를 세션에만 입력
+
+무료 점검을 마친 뒤 서버를 Ctrl+C로 종료합니다. 별도 API 계정·권한·잔액과 요금을 확인하고 선택적으로 실행합니다.
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-openai.txt
+.venv\Scripts\python.exe start_api.py
+```
+
+- 비표시 입력 안내에서 **본인 키를 터미널에 직접 붙여넣습니다**. 화면에 글자가 보이지 않아도 정상입니다. Enter만 누르면 키 없이 시작합니다. 비표시 입력을 지원하지 않는 환경에서는 중단하며 일반 입력으로 바꾸지 않습니다.
+- 프로그램은 키를 현재 서버 프로세스의 환경변수에만 넣고 파일·브라우저·로그에 저장하지 않습니다. 기존 환경변수에 키가 있으면 입력을 생략합니다. `.env`는 이 웹 서버에서 읽지 않습니다. 키를 채팅·소스·Git·스크린샷에 넣지 마세요.
+- 브라우저에서 `openai`를 고르고 **초안 만들기**를 누릅니다. 유료 호출/집계 근거 전송 확인 후 실행합니다. `/docs`의 Execute도 실제 유료 요청을 보낼 수 있습니다.
+- 기본 모델은 `gpt-5.4-mini-2026-03-17`입니다. Responses API, `reasoning.effort=none`, strict JSON Schema, `store=False`, 자동 재시도 0회를 사용합니다. `temperature`는 보내지 않습니다. 모델만 바꾸려면 서버 시작 전 `OPENAI_MODEL`을 설정합니다. 사용자 지정 모델의 Responses/JSON Schema 호환성은 별도 확인이 필요합니다.
+- 요청마다 비용이 발생할 수 있습니다. 타임아웃·브라우저 닫기·재실행이 이미 발생한 비용을 취소하지는 않습니다. 중복 클릭은 화면과 서버에서 막지만 완료 후 다시 누르면 새 요청입니다.
+
+### Hugging Face 선택 실습 · 명시적 설치와 활성화
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-hf.txt
+.venv\Scripts\python.exe start_api.py --enable-huggingface
+```
+
+키 입력에서는 Enter만 누릅니다. 브라우저에서 `huggingface`를 고르고 다운로드 안내를 확인합니다. `Qwen/Qwen2.5-1.5B-Instruct`와 고정 revision을 사용하며 처음에 수 GB를 내려받습니다. CPU는 느리고 메모리 여유가 필요합니다. 앱 시작/template 실행만으로 torch/transformers를 불러오거나 가중치를 내려받지 않습니다. 설치되지 않았거나 활성화하지 않았다면 오류를 보여주며 template 성공으로 바꾸지 않습니다. `--offline`과 `--enable-huggingface`는 함께 사용할 수 없습니다. `--offline`은 키와 HF 활성 환경변수를 모두 제거합니다.
+
+### 본인 시간 CSV로 바꾸기
+
+원본을 `data/raw/asos_hourly.csv`에 두고 서버를 다시 시작합니다. HTTP나 브라우저로 파일을 업로드하는 기능은 아닙니다.
+
+```powershell
+$env:WEATHER_CSV_PATH = "data/raw/asos_hourly.csv"
+$env:WEATHER_STATION = "108"
+.venv\Scripts\python.exe start_api.py --offline
+```
+
+상대 경로는 실습 폴더 기준이며 웹 실습은 최대 10 MiB·100,000행을 받습니다. 여러 관측소가 있으면 `WEATHER_STATION`을 지정합니다. 기본 48행으로 돌아가려면 `Remove-Item Env:WEATHER_CSV_PATH -ErrorAction SilentlyContinue` 후 서버를 다시 실행합니다. 설정한 CSV가 없거나 잘못되어도 동봉 자료로 몰래 대체하지 않습니다. 일자료/DB 월 비교는 아래 CLI 절차를 따릅니다.
+
+### 오류를 만났을 때
+
+| 응답 | 확인할 내용 |
+|---|---|
+| 422 | 요청 필드/범위 또는 CSV의 필수 열·중복·관측소·완전한 날짜 |
+| 503 | API 키/SDK가 없음, 또는 HF 모드가 비활성 |
+| 429 | 이미 생성 중이거나 OpenAI의 요청·잔액·사용량 제한 |
+| 502 | 인증/접근/모델 실행 실패, 잘린 응답, 기사 형식·관측소·숫자 검증 실패 |
+| 504 | OpenAI 대기시간 초과. 재시도 전 사용 내역 확인 |
+| 400 / 403 / 413 / 415 | 잘못된 Host / 다른 웹 출처 / 요청 4 KiB 초과 / JSON 아닌 요청 |
+
+오류에서는 이전 초안을 새 성공 결과처럼 보여주지 않으며 외부 오류 본문·입력 키를 반사하지 않습니다. 이 서버는 **127.0.0.1에만 바인딩하는 1인 로컬 수업용**입니다. 인증·영구 작업 큐·공용 배포용 속도 제한이 없으므로 `0.0.0.0`, 포트 공개, 여러 worker, 외부 배포에 사용하지 않습니다.
+
 
 ## 1. 먼저 데이터 종류를 구분합니다
 
@@ -118,11 +207,12 @@ Copy-Item .env.example .env
 
 ### C. openai: 별도 API 요금이 발생하는 초안
 
-기본값은 **[gpt-4.1-mini-2025-04-14](https://developers.openai.com/api/docs/models/gpt-4.1-mini)**입니다. 한국어 지시 기반 짧은 초안에 적합한 경량 모델의 고정 스냅샷을 사용합니다. OpenAI Responses API를 호출합니다.
+기본값은 **[gpt-5.4-mini-2026-03-17](https://developers.openai.com/api/docs/models/gpt-5.4-mini)**입니다. 한국어 지시 기반 짧은 초안에 적합한 경량 모델의 고정 스냅샷을 사용합니다. OpenAI Responses API를 호출합니다.
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -r requirements-openai.txt
-# .env의 OPENAI_API_KEY를 본인 키로 설정한 뒤 실행합니다.
+# 본인 세션 환경변수에 OPENAI_API_KEY가 설정된 경우의 기존 CLI입니다.
+# 브라우저 실습은 위 start_api.py 비표시 입력을 권장합니다.
 .venv\Scripts\python.exe weather_lab.py generate-article --facts data/results/hourly_facts.json --mode openai --timeout 60 --max-tokens 900 --output data/results/openai_article.json
 ```
 
@@ -130,7 +220,7 @@ Copy-Item .env.example .env
 - OpenAI로 보내는 항목: 관측소 이름, 기간, 지표·단위·집계 수치, 공개 출처 URL, 해석 한계입니다. 원본 CSV, 로컬 파일명·해시, DB ID는 보내지 않습니다.
 - `store=False`로 요청하고 자동 재시도를 끕니다. 이것만으로 모든 서버 로그/보존 정책이 없어지는 것은 아닙니다.
 - `--timeout`은 OpenAI 요청의 제한 시간(1~300초), `--max-tokens`는 출력 상한(128~4096)입니다. 비용이 발생한 응답의 저장 오류를 막으려면 출력 경로를 먼저 확인하세요.
-- `OPENAI_MODEL` 또는 `--model`로 바꿀 수 있으나 Responses/JSON/temperature 지원 여부를 확인해야 합니다.
+- `OPENAI_MODEL` 또는 `--model`로 바꿀 수 있으나 Responses/strict JSON Schema 지원 여부를 확인해야 합니다.
 
 ### 공통 저장·검토 규칙
 
@@ -176,10 +266,15 @@ erDiagram
 ## 8. 테스트와 검증 범위
 
 ```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-api.txt -r requirements-openai.txt
 .venv\Scripts\python.exe -m unittest discover -s tests -v
-.venv\Scripts\python.exe -m compileall -q weather_lab.py article_generation.py hourly_weather.py
+.venv\Scripts\python.exe -m compileall -q weather_lab.py article_generation.py hourly_weather.py app.py start_api.py
 ```
 
-오프라인 테스트 **46개가 통과**했습니다. CSV/월 비교/시간 coverage, 실물 발췌의 24.64℃ 평균, 세 모드 선택, 숫자·형식 검사, API 미설정·타임아웃·불완전 응답, 원본 덮어쓰기 차단·불가능한 coverage 거부·중첩 개인정보 필드 제외·호출 전 출력 경로 검사, HF 입력/출력 토큰 분리와 안전한 로딩 옵션, DB 트랜잭션 계약을 오프라인 검사합니다. 모델 SDK는 mock으로 검사하며 API 요금이나 모델 다운로드가 발생하지 않습니다. 오류 테스트의 가상 수치는 관측 데이터가 아닙니다.
+오프라인 테스트 **64개가 통과**했습니다. 기존 46개 회귀 검사와 API/런처 검사 18개입니다. FastAPI TestClient에서 실제 48행을 집계하고 무료 template, 모델 SDK mock, API 오류·입력 제한·출처 차단·키 비표시 입력·중복 생성 잠금을 확인합니다. CSV/월 비교/시간 coverage, 실물 발췌의 24.64℃ 평균, 세 모드 선택, 숫자·형식 검사, API 미설정·타임아웃·불완전 응답, 원본 덮어쓰기 차단·불가능한 coverage 거부·중첩 개인정보 필드 제외·호출 전 출력 경로 검사, HF 입력/출력 토큰 분리와 안전한 로딩 옵션, DB 트랜잭션 계약을 오프라인 검사합니다. 모델 SDK는 mock으로 검사하며 API 요금이나 모델 다운로드가 발생하지 않습니다. 오류 테스트의 가상 수치는 관측 데이터가 아닙니다.
 
-실물 원본 전체의 41일/984시간/21.38℃ 계산과 템플릿 생성은 별도로 실행했습니다. **실제 MySQL 서버 실행, 실제 HF 가중치 추론, 유료 OpenAI 호출은 수행하지 않았습니다.** 사용자 DB에서 스키마/마이그레이션, 동일 파일 재입력, SQL과 JSON 평균 대조, 생성 기사/이력 JOIN을 확인하세요. PostgreSQL 포트는 별도 `postgre` 브랜치의 `weather-history-postgre-lab`에 있습니다.
+실물 원본 전체의 41일/984시간/21.38℃ 계산과 템플릿 생성은 별도로 실행했습니다. **이번 검증은 Linux에서 수행했습니다. Windows 실기 실행, 실제 MySQL 서버 실행, 실제 HF 가중치 추론, 유료 OpenAI 호출은 수행하지 않았습니다.** 사용자 DB에서 스키마/마이그레이션, 동일 파일 재입력, SQL과 JSON 평균 대조, 생성 기사/이력 JOIN을 확인하세요. PostgreSQL 포트는 별도 `postgre` 브랜치의 `weather-history-postgre-lab`에 있습니다.
+
+### 모델 설정의 공식 근거
+
+2026-10-14 수업 준비 시 [GPT-5.4 mini 공식 모델 문서](https://developers.openai.com/api/docs/models/gpt-5.4-mini)에서 고정 스냅샷, Responses, Structured Outputs, reasoning none 지원을 확인했습니다. [Structured Outputs 가이드](https://developers.openai.com/api/docs/guides/structured-outputs)에 따라 title/lead/body 문자열만 받는 strict JSON Schema를 사용합니다. 출력 형식 보장은 기사 내용의 진실성 보장이 아닙니다. SDK mock 통과는 실제 계정의 모델 접근·잔액·응답 품질 검증이 아닙니다.
